@@ -289,26 +289,36 @@ async function handleLogin(event) {
   submitBtn.disabled = true;
 
   try {
-    // Here you would make API call to login
-    // For now, simulate login
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json();
 
-    // Simulate successful login
-    localStorage.setItem("token", "fake-jwt-token");
-    // store user name (use part before @ if available)
-    const name =
-      email && email.includes("@") ? email.split("@")[0] : email || "User";
-    localStorage.setItem("user", JSON.stringify({ name }));
+    if (!res.ok) {
+      showAuthMessage(
+        data.error || "Đăng nhập thất bại. Vui lòng thử lại.",
+        "error",
+      );
+      return;
+    }
+
+    localStorage.setItem("token", data.access_token);
+    localStorage.setItem("user", JSON.stringify(data.user));
 
     showAuthMessage("Đăng nhập thành công!", "success");
 
-    // Redirect to dashboard
+    // Redirect to returnUrl if present, else dashboard
     setTimeout(() => {
-      window.location.href = "dashboard.html";
+      const params = new URLSearchParams(window.location.search);
+      const returnUrl = params.get("returnUrl");
+      window.location.href =
+        returnUrl && returnUrl.startsWith("/") ? returnUrl : "/dashboard";
     }, 1000);
   } catch (error) {
     console.error("Login error:", error);
-    showAuthMessage("Đăng nhập thất bại. Vui lòng thử lại.", "error");
+    showAuthMessage("Có lỗi xảy ra. Vui lòng thử lại sau.", "error");
   } finally {
     submitBtn.innerHTML = originalText;
     submitBtn.disabled = false;
@@ -358,23 +368,37 @@ async function handleRegister(event) {
   submitBtn.disabled = true;
 
   try {
-    // Here you would make API call to register
-    // For now, simulate registration
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const res = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        first_name: formData.firstName,
+        last_name: formData.lastName,
+        email: formData.email,
+        password: formData.password,
+      }),
+    });
+    const data = await res.json();
 
-    // Simulate successful registration
-    showAuthMessage(
-      "Tạo tài khoản thành công! Vui lòng kiểm tra email để xác nhận.",
-      "success",
-    );
+    if (!res.ok) {
+      showAuthMessage(
+        data.error || "Tạo tài khoản thất bại. Vui lòng thử lại.",
+        "error",
+      );
+      return;
+    }
 
-    // Switch to login tab
+    showAuthMessage("Tạo tài khoản thành công! Đăng nhập ngay.", "success");
+
+    // Switch to login tab and prefill email
     setTimeout(() => {
       showAuthTab("login");
-    }, 2000);
+      const emailInput = document.getElementById("login-email");
+      if (emailInput) emailInput.value = formData.email;
+    }, 1200);
   } catch (error) {
     console.error("Register error:", error);
-    showAuthMessage("Tạo tài khoản thất bại. Vui lòng thử lại.", "error");
+    showAuthMessage("Có lỗi xảy ra. Vui lòng thử lại sau.", "error");
   } finally {
     submitBtn.innerHTML = originalText;
     submitBtn.disabled = false;
@@ -435,8 +459,53 @@ function handleGoogleSignInCallback(response) {
   sendGoogleTokenToBackend(id_token);
 }
 
+/**
+ * Detect if the current browser is an in-app WebView (Facebook, Instagram, Zalo, etc.)
+ * Google blocks OAuth in these embedded browsers with 403 disallowed_useragent.
+ */
+function isInAppBrowser() {
+  var ua = navigator.userAgent || navigator.vendor || "";
+  // Common in-app browser signatures
+  return /FBAN|FBAV|Instagram|Zalo|Line\/|Twitter|Snapchat|Pinterest|MicroMessenger|WeChat|Musical_ly|BytedApp|ByteLocale|TikTok|OKApp|GSA\/|CriOS.*wv|; wv\)/i.test(
+    ua,
+  );
+}
+
 function signInWithGoogle() {
   console.log("signInWithGoogle called - using Authorization Code flow");
+
+  // Detect in-app browsers that Google blocks
+  if (isInAppBrowser()) {
+    var currentUrl = window.location.href;
+    // Try to open in system browser on Android
+    var intentUrl =
+      "intent://" +
+      window.location.host +
+      window.location.pathname +
+      window.location.search +
+      "#Intent;scheme=https;end";
+    // Show user-friendly message
+    showAuthMessage(
+      "Trình duyệt trong ứng dụng không hỗ trợ đăng nhập Google. " +
+        'Hãy mở bằng Chrome/Safari: nhấn "⋮" hoặc "..." → "Mở trong trình duyệt".',
+      "error",
+    );
+    // Attempt: copy URL to clipboard and try intent (Android)
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(currentUrl);
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    // Try opening external browser (works on some Android WebViews)
+    try {
+      window.open(currentUrl, "_system");
+    } catch (e) {
+      /* ignore */
+    }
+    return;
+  }
 
   // Request authorization URL from backend
   fetch("/api/auth/google/authorize", {
@@ -531,7 +600,15 @@ function checkGoogleOAuthResponse() {
   const error = params.get("error");
   if (error) {
     console.error("OAuth error:", error);
-    showAuthMessage("Lỗi đăng nhập Google: " + error, "error");
+    if (error === "disallowed_useragent") {
+      showAuthMessage(
+        "Trình duyệt hiện tại không được Google cho phép đăng nhập. " +
+          'Vui lòng mở trang này bằng Chrome hoặc Safari (nhấn "⋮" → "Mở trong trình duyệt").',
+        "error",
+      );
+    } else {
+      showAuthMessage("Lỗi đăng nhập Google: " + error, "error");
+    }
   }
 }
 
@@ -583,7 +660,10 @@ async function sendGoogleTokenToBackend(id_token) {
 
       showAuthMessage("Đăng nhập Google thành công!", "success");
       setTimeout(() => {
-        window.location.href = "dashboard.html";
+        const params = new URLSearchParams(window.location.search);
+        const returnUrl = params.get("returnUrl");
+        window.location.href =
+          returnUrl && returnUrl.startsWith("/") ? returnUrl : "/dashboard";
       }, 800);
     } else {
       showAuthMessage(

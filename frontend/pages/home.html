@@ -12,10 +12,7 @@
     />
     <link rel="stylesheet" href="/css/theme-dark.css" />
     <link rel="stylesheet" href="/css/home.css" />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
-    />
+    <link rel="stylesheet" href="/libs/fontawesome/css/all.min.css" />
     <script src="/js/auth_state.js" defer></script>
     <script src="/js/languages.js"></script>
     <script src="/js/populate_languages.js" defer></script>
@@ -140,7 +137,7 @@
             <div class="step-icon"><i class="fas fa-upload"></i></div>
             <h4>1. Tải lên hoặc nhập văn bản</h4>
             <p>
-              Hỗ trợ nhập văn bản, upload PDF/DOCX/Excel và giữ định dạng gốc.
+              Hỗ trợ nhập văn bản, upload PDF hoặc Word (.docx) và giữ định dạng gốc.
             </p>
           </div>
           <div class="how-step glassmorphism">
@@ -153,7 +150,7 @@
           <div class="how-step glassmorphism">
             <div class="step-icon"><i class="fas fa-download"></i></div>
             <h4>3. Tải về & sử dụng</h4>
-            <p>Tải file đã dịch (PDF/DOCX) hoặc copy/easy share kết quả.</p>
+            <p>Tải file đã dịch (PDF/DOCX/XLSX/TXT) hoặc copy/easy share kết quả.</p>
           </div>
         </div>
       </div>
@@ -205,7 +202,7 @@
             </div>
             <h3>Giữ định dạng</h3>
             <p>
-              Dịch tài liệu PDF, Word, Excel mà vẫn giữ nguyên định dạng gốc
+              Dịch tài liệu PDF và Word (.docx) mà vẫn giữ nguyên định dạng gốc
             </p>
           </div>
           <div class="feature-card glassmorphism">
@@ -256,22 +253,16 @@
               <h3>Miễn phí</h3>
               <div class="price">
                 <span class="amount">0đ</span>
-                <span class="period">/tháng</span>
+                <span class="period">/lần</span>
               </div>
             </div>
             <ul class="pricing-features">
-              <li><i class="fas fa-check"></i> 5.000 từ/tháng</li>
-              <li>
-                <i class="fas fa-check"></i> 3 file/tháng (PDF/DOCX/XLSX/TXT)
-              </li>
-              <li><i class="fas fa-check"></i> Giữ định dạng cơ bản</li>
-              <li><i class="fas fa-check"></i> Lịch sử 7 ngày</li>
+              <li><i class="fas fa-check"></i> 5.000 token khởi đầu</li>
+              <li><i class="fas fa-check"></i> Dịch văn bản cơ bản</li>
+              <li><i class="fas fa-check"></i> Upload tài liệu PDF/DOCX</li>
               <li><i class="fas fa-times"></i> Không có ưu tiên xử lý</li>
             </ul>
-            <button
-              class="btn-primary"
-              onclick="window.location.href = 'auth.html'"
-            >
+            <button class="btn-primary" onclick="goToUpgrade('free')">
               Bắt đầu miễn phí
             </button>
           </div>
@@ -281,21 +272,19 @@
               <h3>Pro</h3>
               <div class="price">
                 <span class="amount">99.000 VNĐ</span>
-                <span class="period">/tháng</span>
+                <span class="period">/lần</span>
               </div>
             </div>
             <ul class="pricing-features">
-              <li><i class="fas fa-check"></i> 120.000 từ/tháng</li>
-              <li><i class="fas fa-check"></i> 120 file/tháng</li>
-              <li><i class="fas fa-check"></i> 100+ ngôn ngữ</li>
-              <li><i class="fas fa-check"></i> Giữ định dạng nâng cao</li>
-              <li><i class="fas fa-check"></i> Lịch sử không giới hạn</li>
+              <li>
+                <i class="fas fa-check"></i> <strong>120.000 token</strong>
+              </li>
+              <li><i class="fas fa-check"></i> Dịch không giới hạn ký tự</li>
+              <li><i class="fas fa-check"></i> Ưu tiên xử lý hàng đợi</li>
+              <li><i class="fas fa-check"></i> OCR ảnh &amp; tài liệu scan</li>
             </ul>
-            <button
-              class="btn-primary featured"
-              onclick="window.location.href = 'auth.html'"
-            >
-              Đăng ký Pro
+            <button class="btn-primary featured" onclick="goToUpgrade('pro')">
+              Nâng cấp Pro
             </button>
           </div>
           <div class="pricing-card glassmorphism">
@@ -303,25 +292,18 @@
               <h3>ProMax</h3>
               <div class="price">
                 <span class="amount">199.000 VNĐ</span>
-                <span class="period">/tháng</span>
+                <span class="period">/lần</span>
               </div>
             </div>
             <ul class="pricing-features">
-              <li><i class="fas fa-check"></i> 300.000 từ/tháng</li>
-              <li><i class="fas fa-check"></i> 300 file/tháng</li>
-              <li><i class="fas fa-check"></i> Ưu tiên xử lý (Priority)</li>
               <li>
-                <i class="fas fa-check"></i> Glossary + kiểm tra nhất quán
+                <i class="fas fa-check"></i> <strong>300.000 token</strong>
               </li>
-              <li>
-                <i class="fas fa-check"></i> Xuất file linh hoạt (TXT/HTML +
-                theo định dạng)
-              </li>
+              <li><i class="fas fa-check"></i> Tất cả tính năng Pro</li>
+              <li><i class="fas fa-check"></i> Mô hình AI cao cấp nhất</li>
+              <li><i class="fas fa-check"></i> Hỗ trợ ưu tiên 24/7</li>
             </ul>
-            <button
-              class="btn-secondary"
-              onclick="window.location.href = 'auth.html'"
-            >
+            <button class="btn-secondary" onclick="goToUpgrade('promax')">
               Nâng cấp ProMax
             </button>
           </div>

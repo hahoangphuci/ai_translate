@@ -12,7 +12,7 @@ class AuthManager {
   }
 
   redirectToLogin() {
-    window.location.href = "auth.html";
+    window.location.href = "/auth";
   }
 
   logout() {
@@ -20,7 +20,7 @@ class AuthManager {
     this.updateAuthUI();
     // Redirect to auth page after logout
     setTimeout(() => {
-      window.location.href = "auth.html";
+      window.location.href = "/auth";
     }, 500);
   }
 
@@ -90,17 +90,36 @@ class AuthManager {
                     ? "Gói ProMax"
                     : data.plan;
 
+          // Update plan card icon style
+          const iconWrap = document.getElementById("planIconWrap");
+          if (iconWrap) {
+            iconWrap.className = "plan-pill-icon";
+            if (data.plan === "pro") {
+              iconWrap.className += " icon-pro";
+              iconWrap.innerHTML = '<i class="fas fa-bolt"></i>';
+            } else if (data.plan === "promax") {
+              iconWrap.className += " icon-promax";
+              iconWrap.innerHTML = '<i class="fas fa-crown"></i>';
+            } else {
+              iconWrap.innerHTML = '<i class="fas fa-leaf"></i>';
+            }
+          }
+
           const usedEl = document.getElementById("usedToday");
           const quotaEl = document.getElementById("dailyQuota");
           const fillEl = document.getElementById("usageFill");
-          const used = parseInt(data.used_today || 0, 10);
-          const quota = parseInt(data.daily_quota || 0, 10);
-          if (usedEl) usedEl.textContent = used;
-          if (quotaEl) quotaEl.textContent = quota < 0 ? "∞" : quota;
+          const PLAN_CAPS = { free: 5000, pro: 120000, promax: 300000 };
+          const planKey = String(data.plan || "free").toLowerCase();
+          const cap = PLAN_CAPS[planKey] || 5000;
+          const tokenBalance = parseInt(data.token_balance || 0, 10);
+          const pct = Math.min(100, Math.round((tokenBalance / cap) * 100));
+          if (usedEl) usedEl.textContent = tokenBalance.toLocaleString("vi-VN");
+          if (quotaEl) {
+            quotaEl.textContent = cap.toLocaleString("vi-VN") + " token";
+            quotaEl.dataset.cap = cap;
+          }
           if (fillEl) {
-            const pct =
-              quota > 0 ? Math.min(100, Math.round((used / quota) * 100)) : 0;
-            fillEl.style.width = `${pct}%`;
+            fillEl.style.width = pct + "%";
           }
         }
       } catch (e) {
@@ -523,6 +542,7 @@ class TranslationManager {
         document.getElementById("sourceLang").value) ||
       "auto";
     const targetLang = document.getElementById("targetLang").value;
+    const translationProvider = getSelectedTranslationProvider();
 
     // Ensure user is authenticated
     if (!this.auth.isAuthenticated()) {
@@ -572,7 +592,7 @@ class TranslationManager {
     }
 
     try {
-      const response = await fetch("/api/translation/text", {
+      let response = await fetch("/api/translation/text", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -582,15 +602,35 @@ class TranslationManager {
           text: text,
           source_lang: sourceLang,
           target_lang: targetLang,
+          translation_provider: translationProvider,
           is_html: richOn && preserve ? true : false,
         }),
       });
+
+      // If token expired/invalid, retry without auth (route is optional-auth)
+      if (response.status === 401 || response.status === 422) {
+        console.warn(
+          "Auth token rejected, retrying text translation without auth...",
+        );
+        response = await fetch("/api/translation/text", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: text,
+            source_lang: sourceLang,
+            target_lang: targetLang,
+            translation_provider: translationProvider,
+            is_html: richOn && preserve ? true : false,
+          }),
+        });
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(
           errorData.error ||
             errorData.message ||
+            errorData.msg ||
             "Dịch thất bại. Kiểm tra API key (OPENAI/OPENROUTER) trong .env.",
         );
       }
@@ -924,17 +964,6 @@ class FileUploadManager {
 
     if (!fileInput || !uploadArea) return;
 
-    // OCR mode dropdown is only relevant when OCR-in-images is enabled for DOCX
-    const ocrToggle = document.getElementById("uploadDocxOcrImages");
-    const ocrModeSel = document.getElementById("uploadDocxOcrMode");
-    const syncOcrModeEnabled = () => {
-      if (!ocrModeSel) return;
-      const enabled = !!(ocrToggle && ocrToggle.checked);
-      ocrModeSel.disabled = !enabled;
-    };
-    syncOcrModeEnabled();
-    if (ocrToggle) ocrToggle.addEventListener("change", syncOcrModeEnabled);
-
     // Click to select file
     uploadArea.addEventListener("click", (e) => {
       // Open picker for most clicks inside upload area.
@@ -976,10 +1005,8 @@ class FileUploadManager {
     const allowedTypes = [
       "application/pdf",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "text/plain",
     ];
-    const allowedExts = [".pdf", ".docx", ".xlsx", ".txt"];
+    const allowedExts = [".pdf", ".docx"];
     const maxSize = 50 * 1024 * 1024; // 50MB
 
     const fileName = String((file && file.name) || "").toLowerCase();
@@ -988,7 +1015,7 @@ class FileUploadManager {
 
     if (!typeOk && !extOk) {
       UIManager.showAlert(
-        "Định dạng file không được hỗ trợ. Chỉ chấp nhận PDF, Word, Excel, Text.",
+        "Định dạng file không được hỗ trợ. Chỉ chấp nhận PDF và Word (.docx).",
       );
       return;
     }
@@ -1011,37 +1038,7 @@ class FileUploadManager {
     fileInfo.style.display = "block";
     this.selectedFile = file;
 
-    // Auto-enable OCR checkbox for DOCX files only.
-    // For PDF, keep user's current choice to avoid unexpected OCR appendix pages.
-    try {
-      const ocrToggle = document.getElementById("uploadDocxOcrImages");
-      if (ocrToggle) {
-        const name = String(file.name || "").toLowerCase();
-        const type = String(file.type || "").toLowerCase();
-        const isDocx =
-          type ===
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-          name.endsWith(".docx") ||
-          false;
-        const isPdf = type === "application/pdf" || name.endsWith(".pdf");
-        const bilingualSel = document.getElementById("uploadBilingualMode");
-        if (isDocx) {
-          ocrToggle.checked = true;
-          // Trigger change event to sync OCR mode dropdown
-          ocrToggle.dispatchEvent(new Event("change"));
-        } else if (isPdf) {
-          // For PDF, keep user's current OCR choice (some PDFs are scanned and need OCR).
-          // Still force normal replacement mode to avoid translation text overlapping existing lines.
-          ocrToggle.dispatchEvent(new Event("change"));
-          if (bilingualSel) {
-            bilingualSel.value = "none";
-            bilingualSel.dispatchEvent(new Event("change"));
-          }
-        }
-      }
-    } catch (e) {
-      // ignore
-    }
+    // Keep OCR toggle as user-selected; do not auto-toggle when selecting a file.
   }
 
   async uploadDocument() {
@@ -1067,11 +1064,14 @@ class FileUploadManager {
     const formData = new FormData();
     formData.append("file", this.selectedFile);
     formData.append("target_lang", targetLang);
+    const translationProvider = getSelectedTranslationProvider();
+    if (translationProvider) {
+      formData.append("translation_provider", translationProvider);
+    }
 
     // Optional: OCR images embedded in Word (.docx) or PDF
     try {
       const ocrToggle = document.getElementById("uploadDocxOcrImages");
-      const ocrModeSel = document.getElementById("uploadDocxOcrMode");
       const isDocx =
         (this.selectedFile &&
           (this.selectedFile.type ===
@@ -1089,8 +1089,7 @@ class FileUploadManager {
         false;
       if (ocrToggle && ocrToggle.checked && (isDocx || isPdf)) {
         formData.append("ocr_images", "1");
-        const mode = (ocrModeSel && ocrModeSel.value) || "image";
-        formData.append("ocr_mode", mode);
+        formData.append("ocr_mode", "image");
       }
     } catch (e) {
       // ignore
@@ -1117,17 +1116,27 @@ class FileUploadManager {
     }
 
     try {
-      const response = await fetch("/api/translation/document", {
+      let response = await fetch("/api/translation/document", {
         method: "POST",
         headers: this.auth.getAuthHeaders(),
         body: formData,
       });
+
+      // If token expired/invalid, retry without auth (route is optional-auth)
+      if (response.status === 401 || response.status === 422) {
+        console.warn("Auth token rejected, retrying upload without auth...");
+        response = await fetch("/api/translation/document", {
+          method: "POST",
+          body: formData,
+        });
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(
           errorData.error ||
             errorData.message ||
+            errorData.msg ||
             "Upload thất bại. Kiểm tra API key (OPENAI/OPENROUTER) trong .env.",
         );
       }
@@ -1144,6 +1153,11 @@ class FileUploadManager {
         const progressFill = document.getElementById("progressFill");
         const progressText = document.getElementById("progressText");
         const progressPercent = document.getElementById("progressPercent");
+
+        // Reset from previous run so progress does not appear stuck at 100%.
+        progressFill.style.width = "0%";
+        progressPercent.textContent = "0%";
+        progressText.textContent = "Đang bắt đầu xử lý...";
 
         const pollUrl = data.status_url;
         let notFoundCount = 0;
@@ -1201,7 +1215,21 @@ class FileUploadManager {
             notFoundCount = 0;
             fetchErrorCount = 0;
             const statusData = await statusResp.json();
-            const p = statusData.progress || 0;
+            const rawP = Number(statusData.progress);
+            let p = Number.isFinite(rawP)
+              ? Math.max(0, Math.min(100, Math.round(rawP)))
+              : 0;
+
+            const msg = String(statusData.message || "");
+            const pageMatch = msg.match(/PDF:\s*page\s*(\d+)\s*\/\s*(\d+)/i);
+            if (pageMatch) {
+              const cur = Math.max(1, Number(pageMatch[1]) || 1);
+              const total = Math.max(1, Number(pageMatch[2]) || 1);
+              if (cur < total && p >= 100) {
+                p = Math.min(99, 5 + Math.round(((cur - 1) / total) * 85));
+              }
+            }
+
             progressFill.style.width = `${p}%`;
             progressPercent.textContent = `${p}%`;
             progressText.textContent = statusData.message || "Đang xử lý...";
@@ -1218,13 +1246,23 @@ class FileUploadManager {
 
               // Auto download
               if (statusData.download_url) {
-                setTimeout(() => {
-                  const link = document.createElement("a");
-                  link.href = statusData.download_url;
-                  link.download = `translated_${this.selectedFile.name}`;
-                  document.body.appendChild(link);
-                  link.click();
-                  document.body.removeChild(link);
+                setTimeout(async () => {
+                  try {
+                    const resp = await fetch(statusData.download_url);
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const blob = await resp.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = `translated_${this.selectedFile.name}`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    window.URL.revokeObjectURL(url);
+                  } catch (e) {
+                    console.error("Download failed:", e);
+                    window.open(statusData.download_url, "_blank");
+                  }
                 }, 500);
               }
 
@@ -1304,13 +1342,23 @@ class FileUploadManager {
         UIManager.showSuccess("File đã được dịch thành công!");
 
         // Auto download after a short delay
-        setTimeout(() => {
-          const link = document.createElement("a");
-          link.href = data.download_url;
-          link.download = `translated_${this.selectedFile.name}`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
+        setTimeout(async () => {
+          try {
+            const resp = await fetch(data.download_url);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const blob = await resp.blob();
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `translated_${this.selectedFile.name}`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+          } catch (e) {
+            console.error("Download failed:", e);
+            window.open(data.download_url, "_blank");
+          }
         }, 1000);
 
         // Reload stats and history
@@ -1319,7 +1367,18 @@ class FileUploadManager {
       }
     } catch (error) {
       console.error("Upload error:", error);
-      UIManager.showError(error.message || "Có lỗi khi upload file.");
+      const rawMessage = String(error?.message || "");
+      if (
+        /failed to fetch|networkerror|err_connection_refused/i.test(
+          rawMessage.toLowerCase(),
+        )
+      ) {
+        UIManager.showError(
+          "Không kết nối được backend API. Hãy chạy backend tại http://127.0.0.1:5055 (python api_base/run_api.py) và đảm bảo không trùng cổng.",
+        );
+      } else {
+        UIManager.showError(error.message || "Có lỗi khi upload file.");
+      }
     } finally {
       // Hide loading state
       uploadBtnText.textContent = "Upload & Dịch";
@@ -1595,20 +1654,35 @@ class ImageOcrManager {
     formData.append("file", this.selectedImage);
     formData.append("source_lang", sourceLang);
     formData.append("target_lang", targetLang);
+    const translationProvider = getSelectedTranslationProvider();
+    if (translationProvider) {
+      formData.append("translation_provider", translationProvider);
+    }
     const modeSel = document.getElementById("imageOutputMode");
     const mode = String((modeSel && modeSel.value) || "auto").toLowerCase();
     formData.append("mode", mode);
 
     try {
-      const resp = await fetch("/api/translation/image", {
+      let resp = await fetch("/api/translation/image", {
         method: "POST",
         headers: this.auth.getAuthHeaders(),
         body: formData,
       });
 
+      // If token expired/invalid, retry without auth (route is optional-auth)
+      if (resp.status === 401 || resp.status === 422) {
+        console.warn("Auth token rejected, retrying image OCR without auth...");
+        resp = await fetch("/api/translation/image", {
+          method: "POST",
+          body: formData,
+        });
+      }
+
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        throw new Error(data.error || data.message || "OCR & dịch thất bại.");
+        throw new Error(
+          data.error || data.message || data.msg || "OCR & dịch thất bại.",
+        );
       }
 
       // Show results inside the OCR tab (do NOT switch tabs and do NOT overwrite text-translation input)
@@ -1737,17 +1811,17 @@ class DashboardStatsManager {
     document.getElementById("documentCount").textContent = documentCount;
 
     // Use quota info shown in plan card if available
-    const usedText = (document.getElementById("usedToday") || {}).textContent;
-    const quotaText = (document.getElementById("dailyQuota") || {}).textContent;
-    const used = parseInt(usedText || "0", 10);
-    const quota = parseInt(quotaText || "0", 10);
+    const usedEl2 = document.getElementById("usedToday");
+    const quotaEl2 = document.getElementById("dailyQuota");
+    const used = parseInt((usedEl2 || {}).textContent || "0", 10);
+    const cap = parseInt((quotaEl2 && quotaEl2.dataset.cap) || "0", 10);
 
     const usageEl = document.getElementById("usagePercent");
     if (!usageEl) return;
-    if (!Number.isFinite(quota) || quota <= 0) {
+    if (!Number.isFinite(cap) || cap <= 0) {
       usageEl.textContent = "—";
     } else {
-      usageEl.textContent = `${Math.min(100, Math.round((used / quota) * 100))}%`;
+      usageEl.textContent = `${Math.min(100, Math.round((used / cap) * 100))}%`;
     }
   }
 }
@@ -1762,6 +1836,11 @@ class DashboardController {
     this.upload = new FileUploadManager(this.auth);
     this.ocr = new ImageOcrManager(this.auth);
     this.stats = new DashboardStatsManager(this.auth);
+    this.paymentPollTimer = null;
+    this.paymentCountdownTimer = null;
+    this.activePaymentHexId = null;
+    this.activePaymentPackageId = null;
+    this.paymentExpireAtMs = null;
 
     this.init();
   }
@@ -1788,57 +1867,11 @@ class DashboardController {
   }
 
   showLoginRequired() {
-    // Hide main content
-    document.querySelector(".dashboard").style.display = "none";
-    document.querySelector("nav").style.display = "none";
-
-    // Show login required message
-    const loginRequired = document.createElement("div");
-    loginRequired.id = "loginRequired";
-    loginRequired.innerHTML = `
-            <div style="
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                z-index: 9999;
-            ">
-                <div style="
-                    background: rgba(255, 255, 255, 0.1);
-                    backdrop-filter: blur(10px);
-                    border-radius: 20px;
-                    padding: 40px;
-                    text-align: center;
-                    max-width: 400px;
-                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-                ">
-                    <i class="fas fa-lock" style="font-size: 4rem; color: #ffd700; margin-bottom: 20px;"></i>
-                    <h2 style="color: white; margin-bottom: 15px;">Yêu cầu đăng nhập</h2>
-                    <p style="color: rgba(255, 255, 255, 0.8); margin-bottom: 30px; line-height: 1.6;">
-                        Bạn cần đăng nhập để sử dụng tính năng dịch thuật AI.
-                    </p>
-                    <button onclick="window.location.href='auth.html'" style="
-                        background: linear-gradient(45deg, #667eea, #764ba2);
-                        color: white;
-                        border: none;
-                        padding: 15px 30px;
-                        border-radius: 10px;
-                        font-size: 1rem;
-                        font-weight: 600;
-                        cursor: pointer;
-                        transition: transform 0.3s ease;
-                    " onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-                        <i class="fas fa-sign-in-alt"></i> Đăng nhập ngay
-                    </button>
-                </div>
-            </div>
-        `;
-    document.body.appendChild(loginRequired);
+    // Redirect thẳng sang trang đăng nhập, giữ returnUrl để quay lại sau khi login
+    window.location.replace(
+      "/auth?returnUrl=" +
+        encodeURIComponent(window.location.pathname + window.location.search),
+    );
   }
 
   setupEventListeners() {
@@ -1853,7 +1886,7 @@ class DashboardController {
       const loginBtn = document.getElementById("loginBtn");
       if (loginBtn) {
         loginBtn.addEventListener("click", () => {
-          window.location.href = "auth.html";
+          window.location.href = "/auth";
         });
       }
 
@@ -1912,16 +1945,7 @@ class DashboardController {
         );
       }
 
-      // Settings link opens modal
-      const settingsLink = document.querySelector(
-        '.nav-links a.nav-link[href="#settings"]',
-      );
-      if (settingsLink) {
-        settingsLink.addEventListener("click", (e) => {
-          e.preventDefault();
-          openSettingsModal();
-        });
-      }
+      // Settings link navigates to /profile page
 
       // Close notification
       const notificationClose = document.querySelector(".notification-close");
@@ -1961,6 +1985,27 @@ class DashboardController {
         uploadBilingualModeSel.addEventListener("change", syncUploadDelimiter);
       }
       syncUploadDelimiter();
+
+      const copyTransferBtn = document.getElementById("copyTransferBtn");
+      if (copyTransferBtn) {
+        copyTransferBtn.addEventListener("click", () =>
+          this.copyTransferContent(),
+        );
+      }
+
+      const checkPaymentNowBtn = document.getElementById("checkPaymentNowBtn");
+      if (checkPaymentNowBtn) {
+        checkPaymentNowBtn.addEventListener("click", () =>
+          this.checkPaymentNow(),
+        );
+      }
+
+      const recreateInvoiceBtn = document.getElementById("recreateInvoiceBtn");
+      if (recreateInvoiceBtn) {
+        recreateInvoiceBtn.addEventListener("click", () =>
+          this.recreateInvoice(),
+        );
+      }
     } catch (err) {
       console.error("setupEventListeners error:", err);
     }
@@ -1974,21 +2019,431 @@ class DashboardController {
   }
 
   // Upgrade modal handlers
-  openUpgradeModal() {
+  async openUpgradeModal() {
     const m = document.getElementById("upgradeModal");
     if (m) m.style.display = "block";
+    const planView = document.getElementById("planSelectionView");
+    const paymentBox = document.getElementById("paymentBox");
+    const successBox = document.getElementById("paymentSuccessBox");
+    const statusEl = document.getElementById("paymentStatusText");
+    const countdownEl = document.getElementById("paymentCountdown");
+    if (planView) planView.style.display = "block";
+    if (paymentBox) paymentBox.style.display = "none";
+    if (successBox) successBox.style.display = "none";
+    if (statusEl) statusEl.textContent = "";
+    if (countdownEl) countdownEl.textContent = "--:--";
+    // Show with current cached state first, then refresh
+    this._updatePlanCardStates();
+    await this.auth.loadUserInfo();
+    this._updatePlanCardStates();
+  }
+
+  _updatePlanCardStates() {
+    const currentPlan = String(this.auth.profile?.plan || "free").toLowerCase();
+    const plans = ["free", "pro", "promax"];
+    const labels = { free: "Free", pro: "Pro", promax: "ProMax" };
+    const btnClasses = {
+      free: "plan-btn-current",
+      pro: "plan-btn-pro",
+      promax: "plan-btn-promax",
+    };
+    const btnIcons = {
+      free: "fa-check-circle",
+      pro: "fa-bolt",
+      promax: "fa-crown",
+    };
+    const btnTexts = {
+      free: "Đang sử dụng",
+      pro: "Nâng cấp Pro",
+      promax: "Nâng cấp ProMax",
+    };
+    const onclicks = {
+      free: "closeUpgradeModal()",
+      pro: "startUpgrade('pro')",
+      promax: "startUpgrade('promax')",
+    };
+
+    plans.forEach((plan) => {
+      const card = document.querySelector(`.upgrade-plan-card.${plan}-card`);
+      if (!card) return;
+      const btn = card.querySelector(".plan-btn");
+      const badge = card.querySelector(".plan-badge");
+      const isCurrent = plan === currentPlan;
+
+      // Update button
+      if (btn) {
+        btn.className = `plan-btn ${isCurrent ? "plan-btn-current" : btnClasses[plan]}`;
+        btn.setAttribute(
+          "onclick",
+          isCurrent ? "closeUpgradeModal()" : onclicks[plan],
+        );
+        btn.disabled = isCurrent;
+        btn.innerHTML = isCurrent
+          ? `<i class="fas fa-check-circle"></i> Đang sử dụng`
+          : `<i class="fas ${btnIcons[plan]}"></i> ${btnTexts[plan]}`;
+      }
+
+      // Update badge
+      if (badge) {
+        if (isCurrent) {
+          badge.className = "plan-badge";
+          badge.textContent = "Hiện tại";
+        } else if (plan === "pro") {
+          badge.className = "plan-badge popular-badge";
+          badge.innerHTML = '<i class="fas fa-star"></i> Phổ biến';
+        } else if (plan === "promax") {
+          badge.className = "plan-badge promax-badge";
+          badge.innerHTML = '<i class="fas fa-crown"></i> Tốt nhất';
+        } else {
+          badge.className = "plan-badge";
+          badge.textContent = "";
+        }
+      }
+    });
   }
 
   closeUpgradeModal() {
     const m = document.getElementById("upgradeModal");
     if (m) m.style.display = "none";
+    const successBox = document.getElementById("paymentSuccessBox");
+    if (successBox) successBox.style.display = "none";
+    this.stopPaymentPolling();
   }
 
-  startUpgrade(plan) {
+  formatSeconds(totalSeconds) {
+    const sec = Math.max(0, Number(totalSeconds || 0));
+    const mm = Math.floor(sec / 60)
+      .toString()
+      .padStart(2, "0");
+    const ss = Math.floor(sec % 60)
+      .toString()
+      .padStart(2, "0");
+    return `${mm}:${ss}`;
+  }
+
+  formatVnd(value) {
+    const amount = Number(value || 0);
+    return `${amount.toLocaleString("vi-VN")} VNĐ`;
+  }
+
+  setPaymentStatusText(message, kind = "info") {
+    const el = document.getElementById("paymentStatusText");
+    if (!el) return;
+    el.textContent = message;
+    if (kind === "success") {
+      el.style.color = "#22c55e";
+      return;
+    }
+    if (kind === "error") {
+      el.style.color = "#ef4444";
+      return;
+    }
+    el.style.color = "#d1d5db";
+  }
+
+  renderPaymentInstructions(payload) {
+    const planView = document.getElementById("planSelectionView");
+    const paymentBox = document.getElementById("paymentBox");
+    const packageText = document.getElementById("paymentPackageText");
+    const amountText = document.getElementById("paymentAmountText");
+    const transferText = document.getElementById("paymentTransferContent");
+    const expireText = document.getElementById("paymentExpireText");
+    const qrImage = document.getElementById("paymentQrImage");
+    const bankCodeText = document.getElementById("paymentBankCode");
+    const bankAccText = document.getElementById("paymentBankAccount");
+    const bankNameText = document.getElementById("paymentBankAccountName");
+
+    // Hide plan selection, show payment layout
+    if (planView) planView.style.display = "none";
+    if (paymentBox) paymentBox.style.display = "block";
+    this.activePaymentHexId = payload.hex_id || null;
+    this.activePaymentPackageId = payload.package_id || null;
+    this.paymentExpireAtMs = payload.expires_at
+      ? new Date(payload.expires_at).getTime()
+      : null;
+
+    if (packageText) {
+      const tokenText = payload.token_amount
+        ? ` · ${Number(payload.token_amount).toLocaleString("vi-VN")} token`
+        : "";
+      packageText.textContent = `Gói ${payload.package_name}${tokenText}`;
+    }
+    if (amountText) amountText.textContent = this.formatVnd(payload.amount_vnd);
+    if (transferText) transferText.textContent = payload.transfer_content || "";
+    if (expireText) {
+      const expireAt = payload.expires_at
+        ? new Date(payload.expires_at).toLocaleString("vi-VN")
+        : "--";
+      expireText.textContent = expireAt;
+    }
+
+    const bank = payload.bank || {};
+    if (bankCodeText) bankCodeText.textContent = bank.code || "";
+    if (bankAccText) bankAccText.textContent = bank.account_number || "";
+    if (bankNameText) bankNameText.textContent = bank.account_name || "";
+
+    if (qrImage) {
+      const bankCode = bank.code || "";
+      const accountNumber = bank.account_number || "";
+      const amount = Number(payload.amount_vnd || 0);
+      const transferContent = payload.transfer_content || "";
+
+      let qrUrl = payload.qr_image_url || "";
+
+      if (
+        !qrUrl &&
+        bankCode &&
+        accountNumber &&
+        amount > 0 &&
+        transferContent
+      ) {
+        const params = new URLSearchParams({
+          acc: String(accountNumber),
+          bank: String(bankCode),
+          amount: String(Math.round(amount)),
+          des: String(transferContent),
+          template: "compact",
+        });
+        qrUrl = `https://qr.sepay.vn/img?${params.toString()}`;
+      }
+
+      if (qrUrl) {
+        qrImage.src = qrUrl;
+        qrImage.style.display = "block";
+      } else {
+        qrImage.removeAttribute("src");
+        qrImage.style.display = "none";
+
+        if (!bankCode || !accountNumber) {
+          this.setPaymentStatusText(
+            "Chưa cấu hình tài khoản nhận tiền (PAYMENT_BANK_*) nên không thể tạo QR.",
+            "error",
+          );
+        }
+      }
+    }
+
+    this.startCountdown(payload.remaining_seconds);
+  }
+
+  startCountdown(initialSeconds) {
+    const countdownEl = document.getElementById("paymentCountdown");
+    if (!countdownEl) return;
+
+    if (this.paymentCountdownTimer) {
+      clearInterval(this.paymentCountdownTimer);
+      this.paymentCountdownTimer = null;
+    }
+
+    const updateCountdown = () => {
+      if (!this.paymentExpireAtMs) {
+        countdownEl.textContent = "--:--";
+        return;
+      }
+
+      const remaining = Math.max(
+        0,
+        Math.floor((this.paymentExpireAtMs - Date.now()) / 1000),
+      );
+      countdownEl.textContent = this.formatSeconds(remaining);
+      if (remaining <= 0) {
+        clearInterval(this.paymentCountdownTimer);
+        this.paymentCountdownTimer = null;
+      }
+    };
+
+    if (
+      Number.isFinite(Number(initialSeconds)) &&
+      Number(initialSeconds) >= 0 &&
+      !this.paymentExpireAtMs
+    ) {
+      this.paymentExpireAtMs = Date.now() + Number(initialSeconds) * 1000;
+    }
+
+    updateCountdown();
+    this.paymentCountdownTimer = setInterval(updateCountdown, 1000);
+  }
+
+  async loadCurrentPendingInvoice() {
+    try {
+      const response = await fetch("/api/payment/current", {
+        method: "GET",
+        headers: {
+          ...this.auth.getAuthHeaders(),
+        },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.has_pending || !payload.invoice) {
+        return;
+      }
+
+      this.renderPaymentInstructions(payload.invoice);
+      this.setPaymentStatusText(
+        "Đã khôi phục hóa đơn đang chờ. Hệ thống sẽ tiếp tục kiểm tra tự động.",
+      );
+      this.startPaymentPolling(payload.invoice.hex_id);
+    } catch (err) {
+      console.warn("loadCurrentPendingInvoice failed", err);
+    }
+  }
+
+  async reconcilePendingInvoiceSilently() {
+    try {
+      const response = await fetch("/api/payment/current", {
+        method: "GET",
+        headers: {
+          ...this.auth.getAuthHeaders(),
+        },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.has_pending || !payload.invoice) {
+        return;
+      }
+
+      const previousPlan = String(this.auth.profile?.plan || "").toLowerCase();
+      await this.pollPaymentStatus(payload.invoice.hex_id);
+
+      const nextPlan = String(this.auth.profile?.plan || "").toLowerCase();
+      if (nextPlan && previousPlan && nextPlan !== previousPlan) {
+        UIManager.showNotification(
+          "Đã đồng bộ thanh toán thành công và cập nhật gói của bạn.",
+          "success",
+        );
+      }
+    } catch (err) {
+      console.warn("reconcilePendingInvoiceSilently failed", err);
+    }
+  }
+
+  async copyTransferContent() {
+    const transferText = document.getElementById("paymentTransferContent");
+    const value = (transferText && transferText.textContent) || "";
+    if (!value) {
+      this.setPaymentStatusText(
+        "Chưa có nội dung chuyển khoản để sao chép.",
+        "error",
+      );
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(value);
+      UIManager.showNotification(
+        "Đã sao chép nội dung chuyển khoản.",
+        "success",
+      );
+    } catch (err) {
+      this.setPaymentStatusText(
+        "Không thể sao chép tự động, vui lòng copy thủ công.",
+        "error",
+      );
+    }
+  }
+
+  checkPaymentNow() {
+    if (!this.activePaymentHexId) {
+      this.setPaymentStatusText("Chưa có hóa đơn để kiểm tra.", "error");
+      return;
+    }
+    this.pollPaymentStatus(this.activePaymentHexId);
+  }
+
+  recreateInvoice() {
+    if (!this.activePaymentPackageId) {
+      this.setPaymentStatusText(
+        "Không xác định được gói hiện tại để tạo lại hóa đơn.",
+        "error",
+      );
+      return;
+    }
+    this.startUpgrade(this.activePaymentPackageId, { forceNew: true });
+  }
+
+  stopPaymentPolling() {
+    if (this.paymentPollTimer) {
+      clearInterval(this.paymentPollTimer);
+      this.paymentPollTimer = null;
+    }
+
+    if (this.paymentCountdownTimer) {
+      clearInterval(this.paymentCountdownTimer);
+      this.paymentCountdownTimer = null;
+    }
+
+    this.activePaymentHexId = null;
+    this.activePaymentPackageId = null;
+    this.paymentExpireAtMs = null;
+  }
+
+  startPaymentPolling(hexId) {
+    this.stopPaymentPolling();
+    this.activePaymentHexId = hexId;
+    this.paymentPollTimer = setInterval(() => {
+      this.pollPaymentStatus(hexId);
+    }, 8000);
+    this.pollPaymentStatus(hexId);
+  }
+
+  async pollPaymentStatus(hexId) {
+    if (!hexId) return;
+    try {
+      const response = await fetch(
+        `/api/payment/status/${encodeURIComponent(hexId)}`,
+        {
+          method: "GET",
+          headers: {
+            ...this.auth.getAuthHeaders(),
+          },
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          payload.error || "Không thể kiểm tra trạng thái thanh toán",
+        );
+      }
+
+      if (payload.status === "completed") {
+        await this._handlePaymentCompleted(payload);
+        return;
+      }
+
+      if (payload.status === "failed") {
+        this.setPaymentStatusText(
+          "Hóa đơn đã hết hạn. Bạn có thể tạo lại thanh toán mới.",
+          "error",
+        );
+        if (payload.remaining_seconds !== undefined) {
+          this.startCountdown(payload.remaining_seconds);
+        }
+        return;
+      }
+
+      if (payload.expires_at) {
+        this.paymentExpireAtMs = new Date(payload.expires_at).getTime();
+      }
+      if (payload.remaining_seconds !== undefined) {
+        this.startCountdown(payload.remaining_seconds);
+      }
+
+      this.setPaymentStatusText(
+        "Đang chờ giao dịch ngân hàng. Hệ thống tự kiểm tra mỗi 8 giây...",
+      );
+    } catch (err) {
+      this.setPaymentStatusText(
+        `Lỗi kiểm tra trạng thái: ${err.message || err}`,
+        "error",
+      );
+    }
+  }
+
+  startUpgrade(plan, options = {}) {
     if (!this.auth.isAuthenticated()) {
       this.auth.redirectToLogin();
       return;
     }
+
+    const forceNew = Boolean(options.forceNew);
 
     // Development mode: support fake tokens by updating cached user locally
     const token = localStorage.getItem("token") || "";
@@ -2009,41 +2464,86 @@ class DashboardController {
       return;
     }
 
-    const headers = {
-      "Content-Type": "application/json",
-      ...this.auth.getAuthHeaders(),
-    };
+    UIManager.showNotification("Đang tạo hóa đơn thanh toán...", "info");
 
-    UIManager.showNotification("Đang xử lý nâng cấp gói...", "info");
-
-    fetch("/api/payment/dev/activate-plan", {
+    fetch("/api/payment/create", {
       method: "POST",
-      headers,
-      body: JSON.stringify({ plan }),
+      headers: {
+        "Content-Type": "application/json",
+        ...this.auth.getAuthHeaders(),
+      },
+      body: JSON.stringify({ package_id: plan, force_new: forceNew }),
     })
       .then(async (res) => {
         const payload = await res.json().catch(() => ({}));
         if (!res.ok) {
-          const msg =
-            payload && payload.error ? payload.error : "Upgrade failed";
-          throw new Error(msg);
+          throw new Error(payload.error || "Không tạo được hóa đơn thanh toán");
         }
         return payload;
       })
-      .then(async (payload) => {
-        UIManager.showNotification(
-          `Đã nâng cấp lên ${payload.plan_name || plan.toUpperCase()} (Dev).`,
-          "success",
-        );
-        this.closeUpgradeModal();
-        await this.auth.loadUserInfo();
+      .then((payload) => {
+        // If the created/reused invoice is already completed (edge case: webhook already processed it)
+        if (payload.status === "completed") {
+          this._handlePaymentCompleted(payload);
+          return;
+        }
+        this.renderPaymentInstructions(payload);
+        if (payload.is_reused) {
+          this.setPaymentStatusText(
+            "Đang sử dụng lại hóa đơn đang chờ thanh toán.",
+          );
+        } else {
+          this.setPaymentStatusText(
+            "Đã tạo hóa đơn mới. Vui lòng chuyển khoản đúng nội dung.",
+          );
+        }
+        this.startPaymentPolling(payload.hex_id);
       })
       .catch((err) => {
         UIManager.showNotification(
-          `Không thể nâng cấp gói: ${err.message || err}`,
+          `Không thể tạo thanh toán: ${err.message || err}`,
           "error",
         );
       });
+  }
+
+  // Shared handler: called whenever a payment is confirmed completed
+  async _handlePaymentCompleted(payload) {
+    this.stopPaymentPolling();
+
+    const planView = document.getElementById("planSelectionView");
+    const paymentBox = document.getElementById("paymentBox");
+    const successBox = document.getElementById("paymentSuccessBox");
+    if (planView) planView.style.display = "none";
+    if (paymentBox) paymentBox.style.display = "none";
+    if (successBox) {
+      const detailEl = document.getElementById("paymentSuccessDetail");
+      if (detailEl) {
+        const planLabel = payload.package_name || payload.package_id || "mới";
+        const tokenAmt = Number(payload.token_amount || 0);
+        const tokenStr =
+          tokenAmt > 0 ? ` với ${tokenAmt.toLocaleString("vi-VN")} token` : "";
+        detailEl.textContent = `Gói ${planLabel} đã được kích hoạt${tokenStr}. Cảm ơn bạn!`;
+      }
+      const cdEl = document.getElementById("paymentSuccessCountdown");
+      if (cdEl) cdEl.textContent = "3";
+      successBox.style.display = "block";
+
+      let secs = 3;
+      const cdTimer = setInterval(() => {
+        secs--;
+        if (cdEl) cdEl.textContent = String(secs);
+        if (secs <= 0) clearInterval(cdTimer);
+      }, 1000);
+    }
+
+    UIManager.showNotification(
+      "Thanh toán thành công, đã nâng cấp gói.",
+      "success",
+    );
+    await this.auth.loadUserInfo();
+    this._updatePlanCardStates();
+    setTimeout(() => this.closeUpgradeModal(), 3500);
   }
 
   async loadInitialData() {
@@ -2067,6 +2567,9 @@ class DashboardController {
 
     // Update authentication UI
     this.auth.updateAuthUI();
+
+    // If user transferred and reloaded page, silently reconcile latest pending invoice.
+    this.reconcilePendingInvoiceSilently();
   }
 }
 
@@ -2265,9 +2768,16 @@ function loadSettings() {
 }
 
 function saveSettings() {
+  const providerFromSettings = (
+    document.getElementById("translationProvider") || {}
+  ).value;
+  const providerFromUpload = (
+    document.getElementById("uploadTranslationProvider") || {}
+  ).value;
   const s = {
     defaultTargetLang: (document.getElementById("defaultTargetLang") || {})
       .value,
+    translationProvider: providerFromSettings || providerFromUpload || "google",
     autoSave: !!(document.getElementById("autoSave") || {}).checked,
     emailNotifications: !!(document.getElementById("emailNotifications") || {})
       .checked,
@@ -2286,6 +2796,30 @@ function applySettingsToUI(s) {
   if (defaultTarget && s.defaultTargetLang)
     defaultTarget.value = s.defaultTargetLang;
 
+  const providerSel = document.getElementById("translationProvider");
+  const uploadProviderSel = document.getElementById(
+    "uploadTranslationProvider",
+  );
+  const p = String(s.translationProvider || "google")
+    .trim()
+    .toLowerCase();
+
+  if (["google", "deepl", "gemini"].includes(p)) {
+    if (providerSel) {
+      providerSel.value = p;
+    }
+    if (uploadProviderSel) {
+      uploadProviderSel.value = p;
+    }
+  } else {
+    if (providerSel) {
+      providerSel.value = "google";
+    }
+    if (uploadProviderSel) {
+      uploadProviderSel.value = "google";
+    }
+  }
+
   const autoSave = document.getElementById("autoSave");
   if (autoSave && typeof s.autoSave === "boolean")
     autoSave.checked = s.autoSave;
@@ -2301,11 +2835,57 @@ function applySettingsToUI(s) {
   // Apply default target language to translate/upload selects when available
   if (s.defaultTargetLang) {
     const targetLang = document.getElementById("targetLang");
-    if (targetLang && !targetLang.value) targetLang.value = s.defaultTargetLang;
+    if (targetLang) targetLang.value = s.defaultTargetLang;
     const uploadTargetLang = document.getElementById("uploadTargetLang");
-    if (uploadTargetLang && !uploadTargetLang.value)
-      uploadTargetLang.value = s.defaultTargetLang;
+    if (uploadTargetLang) uploadTargetLang.value = s.defaultTargetLang;
+    const imageTargetLang = document.getElementById("imageTargetLang");
+    if (imageTargetLang) imageTargetLang.value = s.defaultTargetLang;
   }
+}
+
+function getSelectedTranslationProvider() {
+  const uploadProviderSel = document.getElementById(
+    "uploadTranslationProvider",
+  );
+  const fromUploadUI = String(
+    (uploadProviderSel && uploadProviderSel.value) || "",
+  )
+    .trim()
+    .toLowerCase();
+  if (["google", "deepl", "gemini"].includes(fromUploadUI)) {
+    return fromUploadUI;
+  }
+
+  const providerSel = document.getElementById("translationProvider");
+  const fromUI = String((providerSel && providerSel.value) || "")
+    .trim()
+    .toLowerCase();
+  if (["google", "deepl", "gemini"].includes(fromUI)) {
+    return fromUI;
+  }
+
+  const s = loadSettings();
+  const fromSettings = String((s && s.translationProvider) || "")
+    .trim()
+    .toLowerCase();
+  if (["google", "deepl", "gemini"].includes(fromSettings)) {
+    return fromSettings;
+  }
+  return "google";
+}
+
+function persistTranslationProvider(provider) {
+  const normalized = String(provider || "")
+    .trim()
+    .toLowerCase();
+  if (!["google", "deepl", "gemini"].includes(normalized)) {
+    return;
+  }
+
+  const s = loadSettings();
+  s.translationProvider = normalized;
+  localStorage.setItem("dashboard_settings", JSON.stringify(s));
+  applySettingsToUI(s);
 }
 
 async function deleteHistoryItem(id) {
@@ -2334,6 +2914,64 @@ async function deleteHistoryItem(id) {
 let dashboard;
 document.addEventListener("DOMContentLoaded", () => {
   dashboard = new DashboardController();
+
+  // Keep translation provider synced between upload quick selector and settings modal.
+  try {
+    const uploadProviderSel = document.getElementById(
+      "uploadTranslationProvider",
+    );
+    if (uploadProviderSel) {
+      uploadProviderSel.addEventListener("change", (e) => {
+        persistTranslationProvider((e.target || {}).value);
+      });
+    }
+
+    const settingsProviderSel = document.getElementById("translationProvider");
+    if (settingsProviderSel) {
+      settingsProviderSel.addEventListener("change", (e) => {
+        persistTranslationProvider((e.target || {}).value);
+      });
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  // Deep-link from Home pricing buttons: /dashboard?upgrade_plan=pro
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const urlPlan = (params.get("upgrade_plan") || "").trim().toLowerCase();
+    const storedPlan = (localStorage.getItem("pending_upgrade_plan") || "")
+      .trim()
+      .toLowerCase();
+
+    const plan = urlPlan || storedPlan;
+    const token = localStorage.getItem("token") || "";
+    const shouldAutoCreate =
+      params.get("autocreate") === "1" || params.get("autocreate") === "true";
+
+    if (plan && token) {
+      dashboard.openUpgradeModal();
+
+      if (shouldAutoCreate || storedPlan) {
+        // Small delay to ensure modal DOM is ready
+        setTimeout(() => dashboard.startUpgrade(plan), 50);
+      }
+    }
+
+    if (storedPlan) localStorage.removeItem("pending_upgrade_plan");
+    if (urlPlan) {
+      params.delete("upgrade_plan");
+      params.delete("autocreate");
+      const qs = params.toString();
+      const newUrl =
+        window.location.pathname +
+        (qs ? `?${qs}` : "") +
+        (window.location.hash || "");
+      window.history.replaceState({}, document.title, newUrl);
+    }
+  } catch (e) {
+    // ignore
+  }
 });
 
 // Add notification styles dynamically

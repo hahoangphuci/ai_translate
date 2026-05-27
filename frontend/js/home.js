@@ -10,6 +10,35 @@ function initializeHomePage() {
   setupMobileMenu();
 }
 
+// Global helper used by pricing CTA buttons
+function goToUpgrade(plan) {
+  const selected = String(plan || "")
+    .trim()
+    .toLowerCase();
+  const token = localStorage.getItem("token") || "";
+
+  // If already logged in, go straight to dashboard and auto-open upgrade flow
+  if (token) {
+    if (selected && selected !== "free") {
+      window.location.href = `/dashboard?upgrade_plan=${encodeURIComponent(selected)}&autocreate=1`;
+    } else {
+      window.location.href = "/dashboard";
+    }
+    return;
+  }
+
+  // Not logged in: remember intended plan for after login
+  if (selected && selected !== "free") {
+    try {
+      localStorage.setItem("pending_upgrade_plan", selected);
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  window.location.href = "/auth";
+}
+
 function setupMobileMenu() {
   // Mobile menu toggle
   window.toggleMenu = function () {
@@ -73,18 +102,8 @@ function scrollToFeatures() {
 }
 
 function setupPricingButtons() {
-  // Add click handlers for pricing buttons
-  document.querySelectorAll(".btn-primary").forEach((button) => {
-    if (
-      button.textContent.includes("Đăng ký") ||
-      button.textContent.includes("Chọn gói")
-    ) {
-      button.addEventListener("click", function () {
-        // Redirect to auth page for registration
-        window.location.href = "auth.html";
-      });
-    }
-  });
+  // Pricing CTA buttons are wired via onclick="goToUpgrade(...)" in home.html.
+  // Keep this function for backward compatibility, but don't override CTA behavior.
 }
 
 function setupHeroAnimations() {
