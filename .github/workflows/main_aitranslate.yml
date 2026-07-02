@@ -10,6 +10,9 @@
 
 name: Build and deploy Python app to Azure Web App - aitranslate
 
+env:
+  AZURE_WEBAPP_NAME: aitranslate2
+
 on:
   workflow_dispatch:
   push:
@@ -85,25 +88,25 @@ jobs:
         run: |
           set -euo pipefail
 
-          RG=$(az webapp list --query "[?name=='aitranslate'].resourceGroup | [0]" -o tsv)
+          RG=$(az webapp list --query "[?name=='${{ env.AZURE_WEBAPP_NAME }}'].resourceGroup | [0]" -o tsv)
           if [ -z "$RG" ]; then
-            echo "Could not resolve resource group for aitranslate"
+            echo "Could not resolve resource group for ${{ env.AZURE_WEBAPP_NAME }}"
             exit 1
           fi
 
           PUBLISH_URL=$(az webapp deployment list-publishing-profiles \
             --resource-group "$RG" \
-            --name aitranslate \
+            --name "${{ env.AZURE_WEBAPP_NAME }}" \
             --query "[?publishMethod=='ZipDeploy'].publishUrl | [0]" -o tsv)
           SCM="https://${PUBLISH_URL%%:*}"
 
           USER=$(az webapp deployment list-publishing-credentials \
             --resource-group "$RG" \
-            --name aitranslate \
+            --name "${{ env.AZURE_WEBAPP_NAME }}" \
             --query publishingUserName -o tsv)
           PASS=$(az webapp deployment list-publishing-credentials \
             --resource-group "$RG" \
-            --name aitranslate \
+            --name "${{ env.AZURE_WEBAPP_NAME }}" \
             --query publishingPassword -o tsv)
           echo "::add-mask::$PASS"
 
@@ -113,7 +116,7 @@ jobs:
           echo "PUBLISH_PASS=$PASS" >> "$GITHUB_ENV"
 
           echo "Restarting app to clear in-memory Kudu deployment lock..."
-          az webapp restart --resource-group "$RG" --name aitranslate
+          az webapp restart --resource-group "$RG" --name "${{ env.AZURE_WEBAPP_NAME }}"
           sleep 90
 
           echo "=== Kudu deployments (before upload) ==="
