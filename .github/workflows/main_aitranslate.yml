@@ -8,6 +8,11 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'api_base/**'
+      - 'frontend/**'
+      - 'requirements.txt'
+      - '.github/workflows/main_aitranslate.yml'
   workflow_dispatch:
 
 # Do NOT cancel in-progress deploys: cancelled OneDeploy runs leave Kudu locks (HTTP 409).
@@ -71,7 +76,7 @@ jobs:
             -x "*/.venv/*" \
             -x "frontend/node_modules/*"
 
-      - name: Clear Kudu deployment locks and configure app
+      - name: Configure Azure app and clear Kudu state
         run: |
           RG=$(az webapp list --query "[?name=='aitranslate'].resourceGroup | [0]" -o tsv)
           if [ -z "$RG" ]; then
@@ -79,7 +84,7 @@ jobs:
             exit 1
           fi
           echo "RESOURCE_GROUP=$RG" >> "$GITHUB_ENV"
-          HOST=$(az webapp list --query "[?name=='aitranslate'].defaultHostName | [0]" -o tsv)
+
           PUBLISH_URL=$(az webapp deployment list-publishing-profiles \
             --resource-group "$RG" \
             --name aitranslate \
@@ -88,19 +93,6 @@ jobs:
           echo "SCM_URL=$SCM" >> "$GITHUB_ENV"
           echo "Resource group: $RG"
           echo "SCM URL: $SCM"
-
-          USER=$(az webapp deployment list-publishing-credentials \
-            --resource-group "$RG" \
-            --name aitranslate \
-            --query publishingUserName -o tsv)
-          PASS=$(az webapp deployment list-publishing-credentials \
-            --resource-group "$RG" \
-            --name aitranslate \
-            --query publishingPassword -o tsv)
-
-          curl -sf -u "$USER:$PASS" -H "Content-Type: application/json" \
-            -d '{"command":"rm -f /home/site/locks/*.lock && echo locks-cleared","dir":"/home"}' \
-            "$SCM/api/command" || echo "Lock cleanup skipped (non-fatal)"
 
           az webapp config appsettings delete \
             --resource-group "$RG" \
@@ -120,11 +112,66 @@ jobs:
             --startup-file "python api_base/run_api.py" \
             --output none
 
-          echo "Waiting 60s for Kudu to release any stale deployment state..."
-          sleep 60
+          USER=$(az webapp deployment list-publishing-credentials \
+            --resource-group "$RG" \
+            --name aitranslate \
+            --query publishingUserName -o tsv)
+          PASS=$(az webapp deployment list-publishing-credentials \
+            --resource-group "$RG" \
+            --name aitranslate \
+            --query publishingPassword -o tsv)
+          echo "::add-mask::$PASS"
 
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: aitranslate
-          package: deploy.zip
+          curl -sf -u "$USER:$PASS" -H "Content-Type: application/json" \
+            -d '{"command":"rm -rf /home/site/locks/* /home/site/deployments/*; echo kudu-cleaned","dir":"/home"}' \
+            "$SCM/api/command" || echo "Kudu cleanup skipped (non-fatal)"
+
+          echo "Waiting 120s for Kudu to settle..."
+          sleep 120
+
+      - name: Deploy via Kudu ZipDeploy (bypass OneDeploy)
+        run: |
+          USER=$(az webapp deployment list-publishing-credentials \
+            --resource-group "$RESOURCE_GROUP" \
+            --name aitranslate \
+            --query publishingUserName -o tsv)
+          PASS=$(az webapp deployment list-publishing-credentials \
+            --resource-group "$RESOURCE_GROUP" \
+            --name aitranslate \
+            --query publishingPassword -o tsv)
+
+          echo "Starting async ZipDeploy..."
+          HTTP_CODE=$(curl -sS -w "%{http_code}" -o zipdeploy-response.json \
+            -X POST \
+            -u "$USER:$PASS" \
+            --data-binary @"deploy.zip" \
+            -H "Content-Type: application/zip" \
+            "$SCM_URL/api/zipdeploy?isAsync=true&deployer=GITHUB_ACTIONS")
+
+          echo "ZipDeploy accepted with HTTP $HTTP_CODE"
+          cat zipdeploy-response.json || true
+
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "ZipDeploy request failed"
+            exit 1
+          fi
+
+          echo "Polling deployment status (Oryx build may take 10-20 min)..."
+          for i in $(seq 1 40); do
+            DEPLOY=$(curl -sf -u "$USER:$PASS" "$SCM_URL/api/deployments/latest" || echo '{}')
+            STATUS=$(echo "$DEPLOY" | jq -r '.status // empty')
+            MSG=$(echo "$DEPLOY" | jq -r '.message // empty')
+            echo "Poll $i/40: status=$STATUS message=$MSG"
+            if [ "$STATUS" = "4" ]; then
+              echo "Deploy succeeded"
+              exit 0
+            fi
+            if [ "$STATUS" = "3" ]; then
+              echo "Deploy failed"
+              curl -sf -u "$USER:$PASS" "$SCM_URL/api/deployments/latest/log" || true
+              exit 1
+            fi
+            sleep 30
+          done
+          echo "Deploy timed out waiting for Oryx build"
+          exit 1
