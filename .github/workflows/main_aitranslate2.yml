@@ -99,3 +99,8 @@ jobs:
           app-name: aitranslate2
           slot-name: Production
           startup-command: 'bash /home/site/wwwroot/startup.sh'
+
+      - name: Deploy failed hint (Site Disabled)
+        if: failure() && steps.deploy-to-webapp.outcome == 'failure'
+        run: |
+          echo "::error::Deploy failed. If log shows 'Site Disabled (CODE: 403)', open Azure Portal -> App Service 'aitranslate2' -> Overview -> Start, then re-run this workflow."
