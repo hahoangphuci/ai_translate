@@ -92,6 +92,41 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_22EB12FAFB244BA690586062CB0487AF }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_6433533AE0694AACABE1DF695065F687 }}
 
+      - name: Ensure App Service is running (fix Site Disabled 403)
+        uses: azure/cli@v2
+        id: ensure-app-running
+        with:
+          azcliversion: agentazcliversion
+          inlineScript: |
+            set -euo pipefail
+            APP="aitranslate2"
+            RG=$(az resource list --resource-type "Microsoft.Web/sites" --name "$APP" --query "[0].resourceGroup" -o tsv)
+            if [ -z "$RG" ] || [ "$RG" = "null" ]; then
+              echo "::error::Cannot find resource group for $APP. Check subscription / app name."
+              exit 1
+            fi
+            echo "Resource group: $RG"
+            STATE=$(az webapp show --name "$APP" --resource-group "$RG" --query "state" -o tsv)
+            echo "Current state: $STATE"
+            if [ "$STATE" != "Running" ]; then
+              echo "Starting $APP..."
+              az webapp start --name "$APP" --resource-group "$RG"
+              for i in 1 2 3 4 5 6; do
+                sleep 10
+                STATE=$(az webapp show --name "$APP" --resource-group "$RG" --query "state" -o tsv)
+                echo "State check $i/6: $STATE"
+                if [ "$STATE" = "Running" ]; then
+                  break
+                fi
+              done
+            fi
+            if [ "$STATE" != "Running" ]; then
+              echo "::error::App $APP is still not Running (state=$STATE)."
+              echo "Open Azure Portal -> App Service '$APP' -> Overview -> Start, then Re-run workflow."
+              exit 1
+            fi
+            echo "App is Running — proceeding to deploy."
+
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
@@ -103,4 +138,7 @@ jobs:
       - name: Deploy failed hint (Site Disabled)
         if: failure() && steps.deploy-to-webapp.outcome == 'failure'
         run: |
-          echo "::error::Deploy failed. If log shows 'Site Disabled (CODE: 403)', open Azure Portal -> App Service 'aitranslate2' -> Overview -> Start, then re-run this workflow."
+          echo "::error::Deploy failed with 'Site Disabled (CODE: 403)'."
+          echo "1) Azure Portal -> App Service 'aitranslate2' -> Overview -> Start"
+          echo "2) Check App Service plan is not suspended (billing/quota)"
+          echo "3) Re-run this workflow from GitHub Actions"
