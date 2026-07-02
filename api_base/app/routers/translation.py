@@ -467,6 +467,13 @@ def document_status(job_id):
     }), 200
 
 
+@translation_bp.route('/status/<job_id>', methods=['GET'])
+@jwt_required(optional=True)
+def document_status_legacy(job_id):
+    """Legacy poll URL used by older dashboard builds."""
+    return document_status(job_id)
+
+
 @translation_bp.route('/save', methods=['POST'])
 @jwt_required()
 def save_translation():

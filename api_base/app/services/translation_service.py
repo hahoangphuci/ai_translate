@@ -8,6 +8,7 @@ import shutil
 import unicodedata
 from dotenv import load_dotenv
 from app.services.file_service import FileService, ProviderRateLimitError
+from app.services.job_store import PersistingJobDict, load as load_job
 from app.services.document_v2.fonts import get_noto_sans_or_fallback as _get_noto_font
 import requests
 import urllib.parse
@@ -2556,14 +2557,14 @@ class TranslationService:
             return (True, None)
     def translate_document_background(self, file_path, target_lang, user_id=None, *, ocr_images=False, ocr_langs=None, ocr_mode=None, bilingual_mode=None, bilingual_delimiter=None, translation_provider=None):
         job_id = str(uuid.uuid4())
-        self.jobs[job_id] = {
+        self.jobs[job_id] = PersistingJobDict(job_id, {
             'status': 'pending',
             'progress': 0,
             'message': 'Queued',
             'download_path': None,
             'error': None,
             'user_id': user_id
-        }
+        })
         # AI preflight is only advisory now (used for OCR/image paths).
         if ocr_images and self.openai_client:
             available, message = self._check_provider_available()
@@ -2765,4 +2766,10 @@ class TranslationService:
         return job_id
 
     def get_job(self, job_id):
-        return self.jobs.get(job_id)
+        job = self.jobs.get(job_id)
+        if job is not None:
+            return job
+        data = load_job(job_id)
+        if data is not None:
+            self.jobs[job_id] = data
+        return data
