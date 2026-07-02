@@ -28,9 +28,9 @@ fi
 cd "${ROOT}/api_base" || exit 1
 
 if PYTHONPATH="${ROOT}/python_packages:${PYTHONPATH:-}" python -c "import gunicorn" 2>/dev/null; then
-  echo "[startup] launching gunicorn"
+  echo "[startup] launching gunicorn (python -m gunicorn)"
   exec env PYTHONPATH="${ROOT}/python_packages:${PYTHONPATH:-}" \
-    gunicorn --bind "0.0.0.0:${PORT}" --workers 1 --threads 8 --timeout 600 run_api:app
+    python -m gunicorn --bind "0.0.0.0:${PORT}" --workers 1 --threads 8 --timeout 600 run_api:app
 fi
 
 echo "[startup] gunicorn unavailable — launching flask dev server"
