@@ -1,0 +1,3 @@
+# Ensure shell scripts use LF on Azure Linux
+startup.sh text eol=lf
+*.sh text eol=lf

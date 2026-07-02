@@ -4,7 +4,7 @@
  */
 (function () {
   const APK_EXTERNAL =
-    "https://legacy-unpaid-sternum.ngrok-free.dev/downloads/AI_Translator_v1.1.5.apk";
+    "https://aitranslate2-dubaawhpf9fqfgfc.southeastasia-01.azurewebsites.net/downloads/AI_Translator_v1.1.5.apk";
   const APK_LOCAL = "/downloads/AI_Translator_v1.1.5.apk";
   const APK_FILENAME = "AI_Translator.apk";
 

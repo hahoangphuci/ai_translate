@@ -1,7 +1,7 @@
 # Build AI Translator APK (release)
 # Yêu cầu: Flutter SDK, Android SDK, JDK 17 (tự tải vào tools/jdk-17 nếu chưa có)
 param(
-    [string]$BaseUrl = "https://legacy-unpaid-sternum.ngrok-free.dev"
+    [string]$BaseUrl = "https://aitranslate2-dubaawhpf9fqfgfc.southeastasia-01.azurewebsites.net"
 )
 
 $ErrorActionPreference = "Stop"

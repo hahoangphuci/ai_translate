@@ -23,15 +23,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies into antenv (deployed to Azure)
+      - name: Verify requirements for Azure runtime
         run: |
-          python -m venv antenv
-          source antenv/bin/activate
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           python -c "from pdf2docx import Converter; print('pdf2docx OK')"
-          python -c "import fitz; print('PyMuPDF OK')"
-          python -c "import cv2; print('opencv OK')"
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
@@ -42,6 +38,7 @@ jobs:
             !**/.git/**
             !**/__pycache__/**
             !**/*.pyc
+            !antenv/**
             !app_web_view/build/**
             !app_web_view/.dart_tool/**
             !tools/**
