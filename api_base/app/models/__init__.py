@@ -30,6 +30,28 @@ class User(db.Model):
     preference    = db.relationship('UserPreference', back_populates='user', uselist=False, cascade='all, delete-orphan')
     login_logs    = db.relationship('UserLoginLog',   back_populates='user', cascade='all, delete-orphan')
 
+    def __init__(
+        self,
+        *,
+        email: str,
+        name: str | None = None,
+        google_id: str | None = None,
+        avatar_url: str | None = None,
+        password_hash: str | None = None,
+        plan: str = 'free',
+        role: str = 'user',
+        token_balance: int | None = None,
+    ) -> None:
+        self.email = email
+        self.name = name
+        self.google_id = google_id
+        self.avatar_url = avatar_url
+        self.password_hash = password_hash
+        self.plan = plan
+        self.role = role
+        if token_balance is not None:
+            self.token_balance = token_balance
+
 
 # ──────────────────────────────────────────────
 # User preferences  (settings trang /profile)
