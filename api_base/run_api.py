@@ -76,6 +76,13 @@ if 'mysql+pymysql://' in _db_uri and importlib.util.find_spec('pymysql') is None
     print("  # or let the app use SQLite when MySQL/XAMPP is down (default fallback)")
     raise SystemExit(1)
 
+if importlib.util.find_spec('pdf2docx') is None:
+    print("\n[ERROR] Missing dependency: 'pdf2docx'.")
+    print("PDF -> DOCX translation requires pdf2docx.")
+    print("\nFix (run in the SAME interpreter you're using to start the app):")
+    print("  python -m pip install pdf2docx==0.5.7")
+    raise SystemExit(1)
+
 if app.config.get('DB_SQLITE_FALLBACK_USED'):
     print(f"[db] Active database: {mask_db_uri(app.config.get('SQLALCHEMY_DATABASE_URI') or '')}")
 

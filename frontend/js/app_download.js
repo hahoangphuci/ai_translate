@@ -4,8 +4,8 @@
  */
 (function () {
   const APK_EXTERNAL =
-    "https://tmpfiles.org/dl/wOwpTFn4Tcm2/app-release.apk";
-  const APK_LOCAL = "/downloads/AI_Translator_v1.0.1.apk";
+    "https://legacy-unpaid-sternum.ngrok-free.dev/downloads/AI_Translator_v1.1.5.apk";
+  const APK_LOCAL = "/downloads/AI_Translator_v1.1.5.apk";
   const APK_FILENAME = "AI_Translator.apk";
 
   function getApkUrl() {
