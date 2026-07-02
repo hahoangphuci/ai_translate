@@ -15,13 +15,6 @@ env:
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'api_base/**'
-      - 'frontend/**'
-      - 'requirements.txt'
 
 concurrency:
   group: aitranslate-production
