@@ -7,13 +7,8 @@ name: Build and deploy Python app to Azure Web App - aitranslate
 on:
   push:
     branches:
-    - main
+      - main
   workflow_dispatch:
-
-# Prevent overlapping deploys to the same App Service (common cause of HTTP 409).
-concurrency:
-  group: aitranslate-production
-  cancel-in-progress: false
 
 jobs:
   build:
@@ -68,14 +63,14 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_D076438F1C9F4ABD8B8DF42EF59B9569 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_35A9C8C8748B465199B36B2C14DD027D }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_F330D54CEC2F400F9D88F89BC6FBC131 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_7A98C9B93ECA48AC9ACEFFC280FDE5E5 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_1D5CB30269644E2187C6DD4F01A89A5D }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_3A9C23FA717E49539B5CEC1A84D2DE11 }}
 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
         with:
           app-name: 'aitranslate'
-          # Production is the default slot; do not set slot-name unless deploying to a named slot (e.g. staging).
+          slot-name: 'Production'
           
